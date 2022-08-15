@@ -1,0 +1,401 @@
+---
+title: "Preposition drop in Daghestanian Russian"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+\vspace{-15truemm}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\begin{center}
+Anastasia Panova, \textit{anastasia.b.panova@gmail.com}
+\end{center}
+
+### 0. Preliminary remarks
+
+This documents presents a statistical part of the research on preposition drop in Russian spoken in Daghestan carried out at Linguistic Convergence Laboratory (HSE) by me and my colleague Tatiana Philippova. Some parts of this document are taken from our paper published in International Journal of Bilingualism.
+
+### 1. Research objectives and hypothesis to be tested
+
+As Daniel et al. (2009) note, "[a] very frequent, and indeed probably one of the most salient linguistic features of the local variety of Russian [in Daghestan] is dropping of the prepositions", cf. (1).
+
+>(1)	tam naprimer Curibe jest' vrač  
+there for_example Tsurib.LOC COP.PRS.SG doctor  
+‘For instance, [in] Tsurib there is a doctor.’ (Daniel et al. 2010: 74)
+ 
+In the previous studies (Daniel & Dobrushina 2009, 2013; Daniel et al. 2010), the phenomenon of preposition drop had been described primarily in qualitative terms. The purpose of the present project was a detailed quantitative study of this phenomenon across a large number of speakers of different L1s. In particular, we wanted to understand what factors condition the phenomenon of preposition drop in locative, directional and temporal phrases.
+
+Based on existing literature on preposition drop in different variaties of different languages, we decided to check whether the probability of preposition drop in Daghestanian Russian depends on preposition type, phonetic environment, semantic type of prepositional complement and sociolinguistic characteristics of the speakers.
+
+### 2. Description of input data: features and values, descriptive statistics, data visualisation
+
+```{r, include=FALSE}
+library("tidyverse")
+```
+
+For this research we used data from the [Corpus of Russian spoken in Daghestan](http://www.parasolcorpus.org/dagrus/) (DagRus). Specifically, my input data was a dataset consisting of 2350 prepositional phrases, coming from sociolinguistic interviews with 47 speakers.
+
+Each prepositional phrase (with or without preposition drop) was annotated with a number of parameters:
+
+- speaker’s ID;
+- sex;
+- year of birth;
+- native language;
+- education level;
+- prepositional head;
+- initial phoneme of the prepositional complement (consonant/vowel);
+- complement type (toponym, temporal location, institution, other).
+
+A csv file with annotated data can be found on [Github](https://github.com/anapanifica/preposition-drop-in-Russian-spoken-in-Daghestan/blob/master/Prep_drop_final_data.csv).
+
+In addition, for each speaker we annotated the degree of nonstandardness of his/her speech. The nonstandardness was calculated as a ratio of the total number of discrepancies from Standard Russian (excluding preposition drop) to the total number of words produced by a speaker.
+
+The data on nonstandardness can be found on [Github](https://github.com/anapanifica/preposition-drop-in-Russian-spoken-in-Daghestan/blob/master/Prep_drop_DagRus%20-%20level%20of%20Russian.csv) as well.
+
+Now let me load and prepare these datasets for further analysis (you can skip section 2.1, if your are not interested in these rather technical things).
+
+#### 2.1. Preparation of the data
+
+The first dataset:
+```{r}
+dat <- read.csv("Prep_drop_final_data.csv")
+dat %>%
+  select(3:5, 7:8, 14:16, 18) -> mydat
+names(mydat)[9] <- "preposition"
+summary(mydat)
+```
+
+The second dataset (the nonstandardness is multiplied by one hundred to obtain the average number of discrepancies from Standard Russian per 100 words):
+```{r}
+dat_lR <- read.csv("Prep_drop_DagRus - level of Russian.csv")
+dat_lR %>%
+#  mutate (nonstandardness = non.standardness*100) %>%
+#  select("носитель", "nonstandardness") -> dat_lR
+  select("носитель", "index") -> dat_lR
+names(dat_lR)[1] <- "respondent"
+names(dat_lR)[2] <- "index"
+summary(dat_lR)
+```
+
+Merging two datasets into one:
+```{r}
+full_join(mydat, dat_lR, by = "respondent") -> mydat
+```
+
+The variables `education` and` language group` have some values which are represented by a too small number of datapoints, so I unite five levels of education into just two (`higher` and `lower`) and unite language groups into langugae families (`Daghestanian`,  `Indo-European`, `Turkic`).
+
+```{r}
+mydat %>% 
+  mutate(ed_levels = ifelse(mydat$education == "higher education", 
+                            "higher", "non-higher")) -> mydat
+mydat %>% 
+  mutate(ed_levels = as.factor(ed_levels)) -> mydat
+mydat %>% 
+  mutate(lang_family = ifelse(mydat$language.group == "Turkic", "Turkic",
+                                      ifelse(mydat$language.group == "Indo-European", 
+                                             "Indo-European", "Daghestanian"))) -> mydat
+mydat %>% 
+  mutate(lang_family = as.factor(lang_family)) -> mydat
+```
+
+I exclude speakers with Russian as L1 because they do not omit prepositions at all and this ruins the logistic regression in the end.
+
+```{r}
+mydat %>% 
+  filter(lang_family != "Indo-European") -> mydat
+```
+
+Below I put into order the values of the parameter `omitted`. I do not include these lines in pdf because they contain cyrillic charachters which for some reason ruin the process of knitting to pdf.
+```{r, include=FALSE}
+mydat %>% 
+  mutate(omitted = ifelse(mydat$omitted == "да", "yes", "no")) -> mydat
+```
+
+#### 2.2. Descriptive statisctics and data visualization
+
+In this section I look at each of my parameters separately and try to visualize their possible correlations with preposition drop.
+
+First, I look at different prepositions. The table shows that only two prepositions _v_ 'in(to)' and _na_ 'on(to)' are omitted frequently.
+
+```{r}
+mydat %>%
+  count(preposition, omitted) %>%
+  spread(omitted, n, fill = 0) %>%
+  mutate(total_n = no+yes) %>% 
+  mutate(yes_percent = (yes/total_n)*100) %>%
+  arrange(desc(total_n))
+```
+```{r}
+mydat %>%
+  count(preposition, name = "total_n") -> mydat1
+mydat %>%
+  group_by(preposition) %>%
+  count(omitted, name = "n") -> mydat2
+full_join(mydat1, mydat2) -> mydat3
+mydat3
+```
+
+```{r}
+mydat3 %>%
+  ggplot(aes(fct_reorder(preposition, total_n), n, fill = omitted, label = n))+
+  geom_col()+
+  geom_text(nudge_y = 2)+
+  coord_flip()
+```
+
+Second, I look at the first phoneme of the prepositional complement. The difference is very small.
+
+```{r}
+mydat %>%
+  count(initial.phoneme, omitted) %>%
+  spread(omitted, n, fill = 0) %>%
+  mutate(total_n = no+yes) %>% 
+  mutate(yes_percent = (yes/total_n)*100)
+```
+
+Then I turn to sociolinguistic parameters. Level of education, sex and language family are visulalized together with the library `ggpubr`. In the folowing figures I consider only prepositional phrases that are headed by seven prepositions that are in principle omittable: this way I partially solve the problem of an uneven distribution of omittable and non-omittable prepositions across speakers.
+
+```{r, include=FALSE}
+mydat$sex <- relevel(mydat$sex, ref = "m")
+library("ggpubr")
+```
+
+```{r}
+mydat %>%
+  filter(preposition == "v 'in(to)'" | preposition == "na 'on(to)'" | 
+           preposition == "s ‘with/from/off’" | preposition == "iz 'from, of'" | 
+           preposition == "za 'behind; for'" | preposition == "k 'to'" | 
+           preposition == "pro 'about") %>%
+  count(respondent, ed_levels, lang_family, sex, omitted) %>%
+  spread(omitted, n, fill = 0) %>%
+  mutate(n = yes+no)%>%
+  mutate(ratio = yes/n)%>%
+  ggboxplot(x = "lang_family", y = "ratio",
+            color = "sex",
+            add = "jitter",
+            outlier.shape = NA,
+            ggtheme = theme_bw(),
+            add.params = list(jitter = 0.3),
+            ylab = "rate of omissions",
+            xlab = "language family",) -> p
+facet(p, facet.by = "ed_levels")
+```
+
+The next figure shows how the ratio of omissions to the number of produced omittable prepositions depends on the year a speaker was born in. Each point corresponds to one speaker. We see that there is no significant correlation.
+
+```{r}
+mydat %>%
+  filter(preposition == "v 'in(to)'" | preposition == "na 'on(to)'" | 
+           preposition == "s ‘with/from/off’" | preposition == "iz 'from, of'" | 
+           preposition == "za 'behind; for'" | preposition == "k 'to'" | 
+           preposition == "pro 'about") %>%
+  count(respondent, year.of.birth, omitted) %>%
+  spread(omitted, n, fill = 0) %>%
+  mutate(n = yes+no)%>%
+  mutate(ratio = yes/n)%>%
+  ggplot(aes(year.of.birth, ratio))+
+  geom_point()+
+  geom_smooth(method=lm, se=TRUE) +
+  labs(x = "year of birth",
+       y = "rate of omissions")+
+  theme_bw()
+```
+
+The next figure shows the relation between the rate of omissions and the speaker’s command of Standard Russian. The linear trend reveals that speakers with a better command of Standard Russian (displaying fewer non-standard features) tend to omit prepositions less frequently.
+
+```{r}
+mydat %>%
+  filter(preposition == "v 'in(to)'" | preposition == "na 'on(to)'" | 
+           preposition == "s ‘with/from/off’" | preposition == "iz 'from, of'" | 
+           preposition == "za 'behind; for'" | 
+           preposition == "k 'to'" | preposition == "pro 'about") %>%
+  count(respondent, index, omitted) %>%
+  spread(omitted, n, fill = 0) %>%
+  mutate(n = yes+no)%>%
+  mutate(ratio = yes/n)%>%
+  ggplot(aes(index, ratio))+
+  geom_point()+
+ # ggrepel::geom_text_repel()+
+  geom_smooth(method=lm, se=TRUE) +
+  labs(x = "fluency index",
+       y = "rate of omissions")+
+  theme_bw()
+```
+
+
+### 3. Discussion of the methods of analysis and their application
+
+#### 3.1. What kind of prepositional phrases allow preposition drop 
+
+I decided to use a logistic regression to assess the significance of the factors discussed above.
+
+Before running a regression, I had to reduce a number of levels in the parameter `preposition`. I grouped prepositions in two types based on linguistic grounds: the prepositions v ‘in(to)’ and na ‘on(to)’ in Standard Russian are precisely those used in general locative and directional phrases, not necessarily specifying the relation between the locatum and the location. Therefore, they are grouped together and contrasted to all other prepositions.
+
+```{r}
+mydat %>%
+  mutate(prep_type = ifelse(mydat$preposition == "v 'in(to)'", "prep_v/na",
+                                       ifelse(mydat$preposition == "na 'on(to)'", 
+                                              "prep_v/na", "prep_other"))) -> mydat
+mydat %>%
+  mutate(prep_type = as.factor(prep_type)) -> mydat
+```
+
+Then I change values of the parameter `year.of.birth` in order to make it more centered. I save all values as factors.
+
+```{r}
+mydat %>% 
+  mutate(year.of.birth = year.of.birth-1900) -> log_dat
+log_dat %>%
+  mutate(year.of.birth = as.integer(year.of.birth)) -> log_dat
+log_dat %>%
+  mutate(omitted = as.factor(omitted)) -> log_dat
+```
+
+I use library `lme4` to run a mixed-effects model. I have one random effect which is a speker.
+
+```{r, warning=FALSE}
+library("lme4")
+```
+
+```{r}
+glmer.res <- glmer (omitted ~ sex + year.of.birth + ed_levels + lang_family + index + initial.phoneme + prep_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+summary(glmer.res)
+```
+
+After that I am trying to choose the best model based on AIC.
+
+```{r}
+drop1(glmer.res, test = "Chisq")
+```
+
+The line which has the smallest AIC is `sex`, so I remove `sex`.
+
+```{r}
+glmer.res2 <- glmer (omitted ~ year.of.birth + ed_levels + lang_family + index + initial.phoneme + prep_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+summary(glmer.res2)
+```
+
+```{r}
+drop1(glmer.res2, test = "Chisq")
+```
+
+The lines which have the smallest AIC is `year.of.birth`, so I remove `year.of.birth`.
+
+```{r}
+glmer.res3 <- glmer (omitted ~ ed_levels + lang_family + index + initial.phoneme + prep_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+summary(glmer.res3)
+```
+
+```{r}
+drop1(glmer.res3, test = "Chisq")
+```
+
+The line which has the smallest AIC is `ed_levels`, so I remove `ed_levels`.
+
+```{r}
+glmer.res4 <- glmer (omitted ~ lang_family + index + initial.phoneme + prep_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+summary(glmer.res4)
+```
+```{r}
+drop1(glmer.res4, test = "Chisq")
+```
+
+```{r}
+glmer.res5 <- glmer (omitted ~ index + initial.phoneme + prep_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+summary(glmer.res5)
+```
+```{r}
+drop1(glmer.res5, test = "Chisq")
+```
+
+The line which has the smallest AIC is `<none>`, so this is the best model. 
+
+I visualize the obtained model with `effects` package.
+
+```{r, include=FALSE}
+library(effects)
+```
+
+```{r}
+names(log_dat)[7] <- "initial_phoneme"
+names(log_dat)[10] <- "fluency_index"
+names(log_dat)[8] <- "probability_of_prep_drop"
+names(log_dat)[13] <- "preposition_type"
+names(log_dat)
+```
+
+
+
+```{r}
+log_dat$initial_phoneme<- relevel(log_dat$initial_phoneme, ref = "vowel")
+glmer.res5 <- glmer (probability_of_prep_drop ~ fluency_index + initial_phoneme + preposition_type + (1|respondent), data = log_dat, family ="binomial", control = glmerControl(optimizer ="bobyqa"))
+plot(allEffects(glmer.res5))
+```
+
+
+#### 3.2. Does preposition drop pattern significantly correlate with nonstandardness?
+
+As an additional observation, in the paper we note that context type and preposition type reveal the existence of three groups of speakers in the sample.
+
+The groups are the following:  
+ - speakers who only omit prepositions v ‘in(to)’, na ‘on(to)’ and only in core contexts*  
+ - speakers who only omit prepositions v ‘in(to)’, na ‘on(to)’ in core and non-core contexts  
+ - speakers who omit prepositions v ‘in(to)’, na ‘on(to)’ in core and non-core contexts and also omit other prepositions  
+
+*Core contexts are contexts where the prepositional complement is a toponym, an exact temporal location or an institution. Non-core contexts are all other contexts.
+
+A natural question to ask at this point is whether the observed patterns correlate with the speakers’ command of Standard Russian. Below I am trying to check this hypothesis.
+
+For each speaker we annotated his/her pattern (membership in one of three groups), so I load the csv file with annotation of speakers one more time, and clean it a little (this chunk is not included because of the problem with cyrillic charachters).
+
+```{r}
+dat_speakers <- read.csv("Prep_drop_DagRus - level of Russian.csv")
+dat_speakers %>%
+  #mutate (nonstandardness = non.standardness*100) %>%
+  filter(носитель != "darvag.ерси.ич42") %>%
+  filter(носитель != "makhachkala.add-4") %>%
+  filter(носитель != "makhachkala.add-5") %>%
+#  select("носитель", "type.of.speaker", "nonstandardness") -> dat_speakers
+  select("носитель", "type.of.speaker", "index") -> dat_speakers
+names(dat_speakers)[1] <- "respondent"
+names(dat_speakers)[2] <- "P_drop_pattern"
+
+dat_speakers <- dat_speakers[-c(47, 48, 49), ]
+#summary(dat_speakers)
+dat_speakers
+```
+
+We can see from the figure that the smaller the average number of non-standard features (the better the command of Standard Russian), the narrower the range of environments with preposition drop.
+
+```{r}
+dat_speakers  %>%
+  mutate(P_drop_pattern = factor(P_drop_pattern, levels = c("not_only_v/na",
+                                              "only_v/na_(not_only_core_contexts)",
+                                              "only_v/na_(only_core_contexts)"))) %>% 
+#  ggplot(aes(P_drop_pattern, nonstandardness, color = P_drop_pattern))+
+  ggplot(aes(P_drop_pattern, index, color = P_drop_pattern))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(width = 0.1)+
+  labs(x = "P-drop pattern",
+       y = "fluency index")+
+  theme_bw()+
+  theme(legend.position = "none")
+```
+
+However, the difference between the groups does not reach statistical significance (p = 0.32, ANOVA test).
+
+```{r}
+#aov_res <- aov(nonstandardness ~ P_drop_pattern, data = dat_speakers)
+aov_res <- aov(index ~ P_drop_pattern, data = dat_speakers)
+summary(aov_res)
+```
+
+
+
+
+
